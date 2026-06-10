@@ -263,6 +263,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Click Download Button
   downloadBtn.addEventListener('click', async () => {
+    // Perform validation first
+    if (!validateInput(true)) {
+      return;
+    }
+
+    // Exit if button is disabled or if we don't have a valid activeUrl
+    if (downloadBtn.hasAttribute('disabled') || !activeUrl) {
+      return;
+    }
+
     const images = downloadImages.checked;
     const delay = parseFloat(delaySlider.value);
     const cookie = cookieInput.value.trim();

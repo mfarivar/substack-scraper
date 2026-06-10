@@ -107,6 +107,11 @@ class StackFlowAPI:
 
     def start_scrape(self, url, download_images, delay, cookie, max_posts, formats="pdf"):
         """Starts the scraping process in a background thread."""
+        if not url or not url.strip():
+            if self.window:
+                self.window.evaluate_js("window.scrapeFailed('No valid Substack URL was provided for scraping.')")
+            return False
+
         if self._scrape_thread and self._scrape_thread.is_alive():
             print("Warning: Scraping is already in progress.")
             return False
