@@ -7,6 +7,15 @@ import threading
 import time
 from urllib.parse import urlparse
 
+# If running as a PyInstaller executable, configure SSL CA bundle paths to use certifi
+if getattr(sys, 'frozen', False):
+    try:
+        import certifi
+        os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+        os.environ['SSL_CERT_FILE'] = certifi.where()
+    except Exception as e:
+        print("Error configuring certifi bundle paths:", e)
+
 # Ensure common macOS executable directories are in the PATH.
 paths_to_add = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
 current_path = os.environ.get('PATH', '')

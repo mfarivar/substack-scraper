@@ -23,6 +23,15 @@ import time
 from typing import Any, Dict, Generator, List, Optional
 from urllib.parse import urlparse
 
+# If running as a PyInstaller executable, configure SSL CA bundle paths to use certifi
+if getattr(sys, 'frozen', False):
+    try:
+        import certifi
+        os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+        os.environ['SSL_CERT_FILE'] = certifi.where()
+    except Exception as e:
+        pass
+
 try:
     import requests
     from bs4 import BeautifulSoup
