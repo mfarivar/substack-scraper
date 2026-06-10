@@ -9,3 +9,11 @@ substack_md/
 
 # Log files
 *.log
+
+# PyInstaller / Packaging build files
+build/
+dist/
+
+# OS files
+.DS_Store
+

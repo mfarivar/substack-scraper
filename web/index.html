@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StackFlow Archiver</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <div class="logo-icon">
+          <img src="logo.png" alt="StackFlow Logo">
+        </div>
+        <h1>StackFlow</h1>
+      </div>
+      <button id="history-toggle-btn" class="icon-btn" title="Scraping History">
+        <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <polyline points="12 6 12 12 16 14"></polyline>
+        </svg>
+      </button>
+    </header>
+
+    <!-- Main Content Panel -->
+    <main class="app-card">
+      
+      <!-- Input Section -->
+      <section class="section url-input-section">
+        <label for="url-input" class="field-label">Paste Substack URL</label>
+        <div class="input-wrapper">
+          <input type="text" id="url-input" placeholder="Paste substack.com or custom domain link..." autocomplete="off">
+          <button id="paste-btn" class="secondary-btn" title="Paste from clipboard">
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Paste</span>
+          </button>
+        </div>
+        <div id="url-error" class="error-msg hidden">Please enter a valid Substack URL</div>
+      </section>
+
+      <!-- Publication Preview Card (Hidden until fetched) -->
+      <div id="pub-preview-card" class="preview-card hidden">
+        <div class="preview-thumbnail">
+          <img id="pub-logo" src="" alt="Publication Logo">
+        </div>
+        <div class="preview-info">
+          <h2 id="pub-title">Publication Title</h2>
+          <p id="pub-desc">Publication Description</p>
+        </div>
+      </div>
+
+      <!-- Settings Grid -->
+      <div class="settings-grid">
+        
+        <!-- Scraping Configuration Options -->
+        <section class="section config-section">
+          <span class="field-label">Download Options</span>
+          
+          <div class="toggle-row">
+            <span class="toggle-label">Download Images</span>
+            <label class="switch-toggle" for="download-images">
+              <input type="checkbox" id="download-images" checked>
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="slider-row">
+            <div class="slider-labels">
+              <span class="slider-label">Request Delay</span>
+              <span id="delay-value">0.2s</span>
+            </div>
+            <input type="range" id="delay-slider" min="0" max="3" step="0.1" value="0.2">
+          </div>
+        </section>
+
+        <!-- Advanced Scope (Cookie & Max Posts) -->
+        <section class="section advanced-section">
+          <span class="field-label">Scope & Auth (Optional)</span>
+          <div class="scope-inputs">
+            <div class="scope-field">
+              <input type="text" id="cookie-input" placeholder="Paste logged-in session Cookie..." autocomplete="off">
+            </div>
+            <div class="scope-field">
+              <input type="text" id="max-posts-input" placeholder="Limit total posts (e.g. 10)" autocomplete="off">
+            </div>
+          </div>
+        </section>
+
+        <!-- Save Location (compact inline row) -->
+        <section class="section folder-section">
+          <div class="folder-row">
+            <span class="field-label">Save To</span>
+            <div class="folder-input-wrapper">
+              <span id="folder-path-display" class="folder-path">~/Downloads</span>
+              <button id="change-folder-btn" class="folder-change-btn" title="Change download folder">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- Action Footer -->
+      <footer class="action-footer">
+        <button id="download-btn" class="primary-btn" disabled>
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span id="download-btn-text">Archive Substack</span>
+        </button>
+      </footer>
+    </main>
+
+    <!-- Overlay Loader (For fetching metadata) -->
+    <div id="loading-overlay" class="overlay hidden">
+      <div class="spinner-wrapper">
+        <div class="spinner"></div>
+        <p>Analyzing Substack...</p>
+      </div>
+    </div>
+
+    <!-- Active Download Overlay -->
+    <div id="download-overlay" class="overlay hidden">
+      <div class="download-status-card">
+        <h3 id="dl-status-title">Archiving Articles</h3>
+        <p id="dl-status-filename" class="text-ellipsis">Initializing scraper...</p>
+        
+        <!-- Progress Bar -->
+        <div class="progress-bar-container">
+          <div id="dl-progress-fill" class="progress-fill" style="width: 0%"></div>
+        </div>
+        
+        <!-- Stats -->
+        <div class="progress-stats">
+          <span id="dl-progress-percent">0%</span>
+          <span id="dl-progress-speed">Waiting...</span>
+          <span id="dl-progress-eta">ETA: --:--</span>
+        </div>
+
+        <button id="cancel-btn" class="danger-btn">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Completion Modal -->
+    <div id="complete-overlay" class="overlay hidden">
+      <div class="success-card">
+        <div class="success-icon-wrapper">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" class="success-checkmark">
+            <path d="M20 6L9 17L4 12" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <h3>Archive Completed!</h3>
+        <p id="success-filename" class="text-ellipsis">Successfully saved articles</p>
+        <p class="success-location">Saved to Downloads folder</p>
+        
+        <div class="success-actions">
+          <button id="show-finder-btn" class="primary-btn">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="btn-icon">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            Show in Finder
+          </button>
+          <button id="reset-btn" class="secondary-btn">Archive Another</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- History Sliding Drawer -->
+    <div id="history-drawer" class="drawer">
+      <div class="drawer-header">
+        <h2>Archive History</h2>
+        <div class="drawer-header-actions">
+          <button id="clear-history-btn" class="clear-btn">Clear All</button>
+          <button id="close-drawer-btn" class="icon-btn-close" title="Close History">
+            <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+      
+      <div class="drawer-body">
+        <div id="history-list" class="history-list">
+          <!-- Populated dynamically -->
+        </div>
+        <div id="history-empty" class="history-empty hidden">
+          <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" class="empty-icon">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+          <p>No archives generated yet</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
