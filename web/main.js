@@ -125,30 +125,31 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const text = await navigator.clipboard.readText();
       urlInput.value = text;
-      urlInput.dispatchEvent(new Event('input'));
+      validateInput(true);
     } catch (err) {
       console.warn('Clipboard read failed, focusing input', err);
       urlInput.focus();
     }
   });
 
-  // URL Input listener: fetches metadata if a valid URL is typed, but does NOT show errors while typing
+  // URL Input listener: ONLY clears validation errors and resets metadata state if empty.
+  // It does NOT validate or fetch metadata while typing.
   urlInput.addEventListener('input', () => {
     const rawText = urlInput.value;
-    const detectedUrl = parseSubstackUrl(rawText);
     
     // Clear validation error when user actively types
     urlError.classList.add('hidden');
     
-    if (!detectedUrl) {
+    if (rawText.trim() === "") {
       resetMetadataState(false);
-      return;
     }
-    
-    if (activeUrl !== detectedUrl) {
-      activeUrl = detectedUrl;
-      fetchMetadata(activeUrl);
-    }
+  });
+
+  // Paste event listener for keyboard paste (Cmd+V)
+  urlInput.addEventListener('paste', () => {
+    setTimeout(() => {
+      validateInput(true);
+    }, 50);
   });
 
   // Validate on blur or Enter key
@@ -409,7 +410,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (detected) {
             lastClipboardText = text;
             urlInput.value = text;
-            urlInput.dispatchEvent(new Event('input'));
+            validateInput(true);
           }
         }
       } catch (err) {
