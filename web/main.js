@@ -199,6 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (window.pywebview && window.pywebview.api) {
         const info = await window.pywebview.api.get_substack_info(url);
         if (info && !info.error) {
+          activeUrl = url;
           pubTitle.innerText = info.title || "Substack Publication";
           pubDesc.innerText = info.description || "No description provided.";
           pubLogo.src = info.logo || "logo.png";
@@ -212,6 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         // Mock fallback for standard browser testing
         setTimeout(() => {
+          activeUrl = url;
           pubTitle.innerText = "PlotSet Visualization Blog";
           pubDesc.innerText = "Democratizing data visualization stories through interactive and animated charts.";
           pubLogo.src = "logo.png";
