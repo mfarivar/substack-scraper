@@ -6,66 +6,57 @@ Archive an entire Substack publication to local Markdown files.
 
 It walks the publication's archive API to enumerate every post, fetches each
 post's full HTML, converts it to Markdown, and writes one file per post with
-YAML front-matter. Optionally downloads inline images so the archive is
-self-contained.
+YAML front-matter. Automatically downloads inline images and localizes links.
+Saves likes, comments, and restacks to a CSV file.
 
 Works with custom-domain Substacks (e.g. https://killercharts.blog).
-
-------------------------------------------------------------------------------
-QUICK START
-------------------------------------------------------------------------------
-    pip install requests markdownify
-    python scrape_substack.py --url https://killercharts.blog --out ./killercharts_md
-
-    # also pull every image down into ./killercharts_md/images and rewrite links:
-    python scrape_substack.py --url https://killercharts.blog --download-images
-
-------------------------------------------------------------------------------
-PAYWALLED POSTS
-------------------------------------------------------------------------------
-Free posts are archived in full. Subscriber-only posts return only the public
-preview UNLESS you supply your own logged-in session cookie. If you are a paid
-subscriber and want the full text of paid posts that *you* can already read:
-
-  1. Log into the publication in your browser.
-  2. Open dev-tools -> Network -> click any request to the site.
-  3. Copy the entire "cookie:" request header value.
-  4. Pass it with --cookie "....":
-
-    python scrape_substack.py --url https://killercharts.blog \
-        --cookie "substack.sid=...; other=..."
-
-Only archive content you are entitled to access, and keep copies for personal
-use in line with the publication's terms.
 """
 
 import argparse
+import base64
 import csv
 import hashlib
-import json
 import os
 import re
 import sys
 import time
+from typing import Any, Dict, Generator, List, Optional
 from urllib.parse import urlparse
 
 try:
     import requests
+    from bs4 import BeautifulSoup
     from markdownify import markdownify as html_to_md
 except ImportError:
-    sys.exit("Missing deps. Run:  pip install requests markdownify")
+    sys.exit("Missing deps. Run:  pip install requests beautifulsoup4 markdownify")
 
 
 # --------------------------------------------------------------------------- #
-# helpers
+# Constants & Mappings
 # --------------------------------------------------------------------------- #
-def slugify(value, fallback="post"):
+EXT_BY_CT: Dict[str, str] = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+    "image/svg+xml": ".svg",
+    "image/avif": ".avif",
+}
+
+
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+def slugify(value: str, fallback: str = "post") -> str:
+    """Convert a string into a clean URL slug."""
     value = re.sub(r"[^\w\s-]", "", (value or "")).strip().lower()
     value = re.sub(r"[\s_-]+", "-", value)
     return value[:80] or fallback
 
 
-def make_session(cookie):
+def make_session(cookie: str) -> requests.Session:
+    """Create a configured requests Session with optional cookie authentication."""
     s = requests.Session()
     s.headers.update(
         {
@@ -82,8 +73,8 @@ def make_session(cookie):
     return s
 
 
-def get_json(session, url, delay, retries=4):
-    """GET a URL and return parsed JSON, with simple backoff on errors/429/5xx."""
+def get_json(session: requests.Session, url: str, delay: float, retries: int = 4) -> Optional[Any]:
+    """GET a URL and return parsed JSON, with exponential backoff on errors."""
     for attempt in range(retries):
         try:
             r = session.get(url, timeout=30)
@@ -91,21 +82,38 @@ def get_json(session, url, delay, retries=4):
                 try:
                     return r.json()
                 except ValueError:
-                    print(f"  ! non-JSON response from {url}", file=sys.stderr)
+                    print(f"  ! Non-JSON response from {url}", file=sys.stderr)
                     return None
             if r.status_code == 404:
                 return None
+            if r.status_code in (401, 403):
+                print(f"  ! Auth / Permission error (HTTP {r.status_code}) on {url}", file=sys.stderr)
+                return None
             print(f"  ! HTTP {r.status_code} on {url}", file=sys.stderr)
         except requests.RequestException as e:
-            print(f"  ! request error ({e}) on {url}", file=sys.stderr)
-        time.sleep(delay * (attempt + 2))  # back off
+            print(f"  ! Request error ({e}) on {url}", file=sys.stderr)
+        time.sleep(delay * (attempt + 2))  # Exponential backoff
     return None
 
 
+def get_default_out_dir(url: str) -> str:
+    """Generate a clean directory name from a Substack URL."""
+    parsed = urlparse(url)
+    netloc = parsed.netloc or parsed.path
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    if netloc.endswith(".substack.com"):
+        name = netloc[:-13]
+    else:
+        parts = netloc.split(".")
+        name = parts[-2] if len(parts) > 1 else parts[0]
+    return f"./{slugify(name)}_md"
+
+
 # --------------------------------------------------------------------------- #
-# substack API walking
+# Substack API Walking
 # --------------------------------------------------------------------------- #
-def fetch_archive(session, base, limit, delay):
+def fetch_archive(session: requests.Session, base: str, limit: int, delay: float) -> Generator[Dict[str, Any], None, None]:
     """Yield post-metadata dicts from the archive API, paginating to the end."""
     offset = 0
     while True:
@@ -119,52 +127,48 @@ def fetch_archive(session, base, limit, delay):
         time.sleep(delay)
 
 
-def fetch_post(session, base, slug, delay):
+def fetch_post(session: requests.Session, base: str, slug: str, delay: float) -> Optional[Dict[str, Any]]:
+    """Fetch detail payload for a specific post."""
     return get_json(session, f"{base}/api/v1/posts/{slug}", delay)
 
 
 # --------------------------------------------------------------------------- #
-# image handling
+# Image Handling & Localization
 # --------------------------------------------------------------------------- #
-IMG_MD_RE = re.compile(r"(!\[[^\]]*\]\()(https?://[^)\s]+?)(\s+\"[^\"]*\")?(\))")
-EXT_BY_CT = {
-    "image/jpeg": ".jpg",
-    "image/png": ".png",
-    "image/gif": ".gif",
-    "image/webp": ".webp",
-    "image/svg+xml": ".svg",
-    "image/avif": ".avif",
-}
-
-
-def localize_images(session, markdown, img_dir, delay, cache):
-    """Download every image referenced in the markdown and rewrite links to
-    point at ./images/<hash>.<ext> (relative to each post file)."""
-
-    def repl(m):
-        url = m.group(2)
-        if url not in cache:
-            cache[url] = _download_one(session, url, img_dir, delay)
-        local = cache[url]
-        if not local:
-            return m.group(0)  # leave original URL on failure
-        return f"{m.group(1)}images/{local}{m.group(3) or ''}{m.group(4)}"
-
-    return IMG_MD_RE.sub(repl, markdown)
-
-
-def _download_one(session, url, img_dir, delay):
+def _download_one(session: requests.Session, url: str, img_dir: str, delay: float) -> Optional[str]:
+    """Download a single image URL (supports base64 and standard URLs) and return its local filename."""
     os.makedirs(img_dir, exist_ok=True)
     h = hashlib.sha1(url.encode()).hexdigest()[:16]
-    # reuse if already on disk
+
+    # Handle Base64 inline data URLs directly without making network requests
+    if url.startswith("data:image/"):
+        try:
+            header, encoded = url.split(",", 1)
+            ext = "." + header.split(";")[0].split("/")[1]
+            # Strip off metadata if any (e.g. ;base64)
+            if "+" in ext:
+                ext = ext.split("+")[0]
+            data = base64.b64decode(encoded)
+            name = f"{h}{ext}"
+            with open(os.path.join(img_dir, name), "wb") as f:
+                f.write(data)
+            return name
+        except Exception as e:
+            print(f"  ! Failed to decode inline base64 image: {e}", file=sys.stderr)
+            return None
+
+    # check cache on disk
     for existing in os.listdir(img_dir):
         if existing.startswith(h):
             return existing
+
+    # Standard URL download
     try:
         r = session.get(url, timeout=60)
         if r.status_code != 200:
             return None
-        ext = EXT_BY_CT.get(r.headers.get("Content-Type", "").split(";")[0].strip())
+        content_type = r.headers.get("Content-Type", "").split(";")[0].strip()
+        ext = EXT_BY_CT.get(content_type)
         if not ext:
             path_ext = os.path.splitext(urlparse(url).path)[1]
             ext = path_ext if path_ext else ".img"
@@ -173,18 +177,74 @@ def _download_one(session, url, img_dir, delay):
             f.write(r.content)
         time.sleep(delay)
         return name
-    except requests.RequestException:
+    except requests.RequestException as e:
+        print(f"  ! Image download failed for {url}: {e}", file=sys.stderr)
         return None
 
 
-# --------------------------------------------------------------------------- #
-# rendering a post to markdown
-# --------------------------------------------------------------------------- #
-def yaml_escape(s):
-    return '"' + str(s or "").replace("\\", "\\\\").replace('"', '\\"') + '"'
+def localize_html_images(session: requests.Session, body_html: str, img_dir: str, delay: float, cache: Dict[str, str]) -> str:
+    """Parse HTML body, download images, clean picture tags, and localize all src & anchor hrefs."""
+    if not body_html:
+        return ""
+
+    soup = BeautifulSoup(body_html, "html.parser")
+
+    # Simplify picture tags: extract nested img tag and discard source wrappers
+    for picture in soup.find_all("picture"):
+        img = picture.find("img")
+        if img:
+            picture.replace_with(img)
+
+    # Process all image tags
+    for img in soup.find_all("img"):
+        src = img.get("src")
+        if not src:
+            continue
+        if src.startswith("images/"):
+            continue
+
+        if src not in cache:
+            cache[src] = _download_one(session, src, img_dir, delay) or ""
+        local = cache[src]
+
+        if local:
+            local_path = f"images/{local}"
+            img["src"] = local_path
+            # Delete srcset so markdown converters or viewers don't fetch original sources
+            if img.get("srcset"):
+                del img["srcset"]
+
+            # If wrapped in an anchor link pointing to the same CDN image, localize the link as well
+            current = img
+            for _ in range(4):
+                parent = current.parent
+                if not parent:
+                    break
+                if parent.name == "a":
+                    href = parent.get("href")
+                    if href:
+                        is_image_link = "substackcdn.com" in href or any(
+                            ext in href.lower() for ext in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic"]
+                        )
+                        if is_image_link:
+                            parent["href"] = local_path
+                    break
+                current = parent
+
+    return str(soup)
 
 
-def post_to_markdown(meta, detail):
+# --------------------------------------------------------------------------- #
+# Rendering Post to Markdown
+# --------------------------------------------------------------------------- #
+def yaml_escape(s: str) -> str:
+    """Escape titles/descriptions cleanly for YAML front-matter."""
+    cleaned = str(s or "").replace("\n", " ").replace("\r", "").strip()
+    return '"' + cleaned.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def post_to_markdown(meta: Dict[str, Any], detail: Dict[str, Any]) -> str:
+    """Convert post payload details to Markdown with front-matter."""
     title = detail.get("title") or meta.get("title") or "untitled"
     subtitle = detail.get("subtitle") or meta.get("subtitle") or ""
     date = (detail.get("post_date") or meta.get("post_date") or "")[:10]
@@ -218,28 +278,9 @@ def post_to_markdown(meta, detail):
 
 
 # --------------------------------------------------------------------------- #
-# helpers for URL parsing
+# Main
 # --------------------------------------------------------------------------- #
-def get_default_out_dir(url):
-    parsed = urlparse(url)
-    netloc = parsed.netloc or parsed.path
-    if netloc.startswith("www."):
-        netloc = netloc[4:]
-    if netloc.endswith(".substack.com"):
-        name = netloc[:-13]
-    else:
-        parts = netloc.split(".")
-        if len(parts) > 1:
-            name = parts[-2]
-        else:
-            name = parts[0]
-    return f"./{slugify(name)}_md"
-
-
-# --------------------------------------------------------------------------- #
-# main
-# --------------------------------------------------------------------------- #
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description="Archive a Substack to Markdown files.")
     ap.add_argument("--url", default="https://killercharts.blog",
                     help="Publication base URL (default: https://killercharts.blog)")
@@ -261,10 +302,15 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     img_dir = os.path.join(args.out, "images")
     session = make_session(args.cookie)
-    img_cache = {}
+    img_cache: Dict[str, str] = {}
 
     print(f"Enumerating archive at {base} ...")
-    posts = list(fetch_archive(session, base, args.limit, args.delay))
+    posts = []
+    for post in fetch_archive(session, base, args.limit, args.delay):
+        posts.append(post)
+        if args.max_posts and len(posts) >= args.max_posts:
+            break
+
     if not posts:
         sys.exit(
             "No posts returned. The API may be unreachable from your network, "
@@ -278,7 +324,7 @@ def main():
     csv_writer = csv.writer(csv_file)
     csv_writer.writerow(["Date", "Title", "Slug", "Audience", "Likes", "Reshares", "Comments", "URL", "File"])
 
-    index_rows = []
+    index_rows: List[tuple] = []
     for i, meta in enumerate(sorted(posts, key=lambda p: p.get("post_date", ""), reverse=True), 1):
         if args.max_posts and i > args.max_posts:
             print(f"Reached max-posts limit of {args.max_posts}. Stopping.")
@@ -287,10 +333,14 @@ def main():
         if not slug:
             continue
         detail = fetch_post(session, base, slug, args.delay) or meta
-        md = post_to_markdown(meta, detail)
 
+        detail_copy = detail.copy()
         if args.download_images:
-            md = localize_images(session, md, img_dir, args.delay, img_cache)
+            detail_copy["body_html"] = localize_html_images(
+                session, detail.get("body_html", ""), img_dir, args.delay, img_cache
+            )
+
+        md = post_to_markdown(meta, detail_copy)
 
         date = (detail.get("post_date") or meta.get("post_date") or "")[:10]
         fname = f"{date}_{slugify(slug)}.md".lstrip("_")
