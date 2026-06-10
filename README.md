@@ -80,7 +80,7 @@ To run or build the application from source, you will need:
 
 3. **Install dependencies**:
    ```bash
-   pip install requests beautifulsoup4 markdownify pywebview pyinstaller
+   pip install requests beautifulsoup4 markdownify fpdf2 pywebview pyinstaller
    ```
 
 4. **Run the app**:
@@ -92,7 +92,7 @@ To run or build the application from source, you will need:
 
 If you prefer using a command-line interface, you can run the scraper directly:
 ```bash
-python3 scrape_substack.py --url https://plotset2.substack.com/ --download-images
+python3 scrape_substack.py --url https://plotset2.substack.com/ --download-images --formats pdf,md
 ```
 
 This command will:
@@ -113,6 +113,7 @@ This command will:
 | `--cookie` | `""` | Logged-in session cookie string (to fetch full text for paid posts you own). |
 | `--download-images`| *Disabled* | Flag to download inline images locally and rewrite Markdown image links. |
 | `--max-posts` | *None* | Limit the total number of articles to download (useful for quick testing). |
+| `--formats` | `pdf` | Comma-separated list of formats to save: `pdf`, `md`, `html`, `json`. |
 
 ---
 

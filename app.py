@@ -27,7 +27,10 @@ from scrape_substack import (
     localize_html_images,
     get_default_out_dir,
     make_session,
-    slugify
+    slugify,
+    generate_pdf,
+    generate_html,
+    generate_json
 )
 
 class StackFlowAPI:
@@ -91,7 +94,7 @@ class StackFlowAPI:
         except Exception as e:
             return {'error': str(e)}
 
-    def start_scrape(self, url, download_images, delay, cookie, max_posts):
+    def start_scrape(self, url, download_images, delay, cookie, max_posts, formats="pdf"):
         """Starts the scraping process in a background thread."""
         if self._scrape_thread and self._scrape_thread.is_alive():
             print("Warning: Scraping is already in progress.")
@@ -99,7 +102,7 @@ class StackFlowAPI:
         self._cancelled = False
         self._scrape_thread = threading.Thread(
             target=self._scrape_worker,
-            args=(url, download_images, delay, cookie, max_posts),
+            args=(url, download_images, delay, cookie, max_posts, formats),
             daemon=True
         )
         self._scrape_thread.start()
@@ -233,7 +236,7 @@ class StackFlowAPI:
                 return True
         return False
 
-    def _scrape_worker(self, url, download_images, delay, cookie, max_posts):
+    def _scrape_worker(self, url, download_images, delay, cookie, max_posts, formats="pdf"):
         session = make_session(cookie)
         try:
             base = url.rstrip("/")
@@ -246,6 +249,7 @@ class StackFlowAPI:
             img_dir = os.path.join(out_dir, "images")
             
             img_cache = {}
+            formats_list = [f.strip().lower() for f in formats.split(",")]
             
             self.window.evaluate_js("window.updateStatusText('Enumerating publication archive...')")
             
@@ -297,12 +301,36 @@ class StackFlowAPI:
                             session, detail.get("body_html", ""), img_dir, delay, img_cache
                         )
                         
-                    md = post_to_markdown(meta, detail_copy)
                     date = (detail.get("post_date") or meta.get("post_date") or "")[:10]
-                    fname = f"{date}_{slugify(slug)}.md".lstrip("_")
+                    base_name = f"{date}_{slugify(slug)}".lstrip("_")
                     
-                    with open(os.path.join(out_dir, fname), "w", encoding="utf-8") as f:
-                        f.write(md)
+                    # Select primary representative filename for posts.csv and index.md
+                    primary_fname = ""
+                    if "pdf" in formats_list:
+                        primary_fname = f"{base_name}.pdf"
+                    elif "md" in formats_list:
+                        primary_fname = f"{base_name}.md"
+                    elif "html" in formats_list:
+                        primary_fname = f"{base_name}.html"
+                    elif "json" in formats_list:
+                        primary_fname = f"{base_name}.json"
+                    else:
+                        primary_fname = f"{base_name}.pdf"
+
+                    # Generate files based on formats
+                    if "pdf" in formats_list:
+                        generate_pdf(meta, detail_copy, out_dir, f"{base_name}.pdf")
+                        
+                    if "md" in formats_list:
+                        md = post_to_markdown(meta, detail_copy)
+                        with open(os.path.join(out_dir, f"{base_name}.md"), "w", encoding="utf-8") as f:
+                            f.write(md)
+                            
+                    if "html" in formats_list:
+                        generate_html(meta, detail_copy, out_dir, f"{base_name}.html")
+                        
+                    if "json" in formats_list:
+                        generate_json(meta, detail_copy, out_dir, f"{base_name}.json")
                         
                     likes = detail.get("reaction_count") or meta.get("reaction_count") or 0
                     reshares = detail.get("restacks") or meta.get("restacks") or 0
@@ -317,10 +345,10 @@ class StackFlowAPI:
                         reshares,
                         comments,
                         detail.get("canonical_url") or meta.get("canonical_url") or "",
-                        fname
+                        primary_fname
                     ])
                     
-                    index_rows.append((date, title, fname, likes, reshares, comments))
+                    index_rows.append((date, title, primary_fname, likes, reshares, comments))
                     
                     # Calculate progress
                     percent = int((current_idx / total_items) * 100)

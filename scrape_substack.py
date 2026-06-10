@@ -27,8 +27,9 @@ try:
     import requests
     from bs4 import BeautifulSoup
     from markdownify import markdownify as html_to_md
+    from fpdf import FPDF
 except ImportError:
-    sys.exit("Missing deps. Run:  pip install requests beautifulsoup4 markdownify")
+    sys.exit("Missing deps. Run:  pip install requests beautifulsoup4 markdownify fpdf2")
 
 
 # --------------------------------------------------------------------------- #
@@ -278,12 +279,210 @@ def post_to_markdown(meta: Dict[str, Any], detail: Dict[str, Any]) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Alternative Formats rendering (PDF, HTML, JSON)
+# --------------------------------------------------------------------------- #
+def clean_unicode_text(text: str) -> str:
+    """Replace common smart quotes and dashes with ASCII equivalents to avoid FPDF Helvetica mapping errors."""
+    replacements = {
+        '\u201c': '"',  # left double quote
+        '\u201d': '"',  # right double quote
+        '\u2018': "'",  # left single quote
+        '\u2019': "'",  # right single quote
+        '\u2013': '-',  # en dash
+        '\u2014': '--', # em dash
+        '\u2022': '*',  # bullet
+        '\u2026': '...',# ellipsis
+        '\u00a0': ' ',  # non-breaking space
+        '\u202f': ' ',  # narrow no-break space
+        '\u200b': '',   # zero-width space
+    }
+    for orig, rep in replacements.items():
+        text = text.replace(orig, rep)
+    return text.encode('latin-1', 'replace').decode('latin-1')
+
+
+def generate_pdf(meta: Dict[str, Any], detail: Dict[str, Any], out_dir: str, fname: str) -> bool:
+    """Generate a PDF representation of the post using FPDF2."""
+    title = detail.get("title") or meta.get("title") or "untitled"
+    subtitle = detail.get("subtitle") or meta.get("subtitle") or ""
+    date = (detail.get("post_date") or meta.get("post_date") or "")[:10]
+    
+    body_html = detail.get("body_html", "")
+    pdf_soup = BeautifulSoup(body_html, "html.parser")
+    
+    # Resolve images to absolute local paths
+    for img in pdf_soup.find_all("img"):
+        src = img.get("src")
+        if src and src.startswith("images/"):
+            img["src"] = os.path.abspath(os.path.join(out_dir, src))
+            if img.get("srcset"):
+                del img["srcset"]
+                
+    # Clean unsupported tags for fpdf2
+    for tag in pdf_soup.find_all(["script", "style", "button", "iframe", "video", "svg"]):
+        tag.decompose()
+        
+    html_content = clean_unicode_text(str(pdf_soup))
+    clean_title = clean_unicode_text(title)
+    clean_subtitle = clean_unicode_text(subtitle)
+    
+    class SubstackPDF(FPDF):
+        def header(self):
+            self.set_font('helvetica', 'B', 8)
+            self.set_text_color(128, 128, 128)
+            self.cell(0, 10, 'Archived via StackFlow', border=0, align='R')
+            self.ln(10)
+            
+        def footer(self):
+            self.set_y(-15)
+            self.set_font('helvetica', 'I', 8)
+            self.set_text_color(128, 128, 128)
+            self.cell(0, 10, f'Page {self.page_no()}', border=0, align='C')
+
+    pdf = SubstackPDF()
+    pdf.add_page()
+    
+    # Title
+    pdf.set_font("helvetica", "B", 18)
+    pdf.set_text_color(0, 0, 0)
+    pdf.write(10, clean_title)
+    pdf.ln(12)
+    
+    # Subtitle
+    if clean_subtitle:
+        pdf.set_font("helvetica", "I", 12)
+        pdf.set_text_color(100, 100, 100)
+        pdf.write(8, clean_subtitle)
+        pdf.ln(10)
+        
+    # Meta line
+    pdf.set_font("helvetica", "B", 9)
+    pdf.set_text_color(150, 150, 150)
+    pdf.cell(0, 6, f"Published: {date}", border="B")
+    pdf.ln(8)
+    
+    # Content
+    pdf.set_font("helvetica", size=10)
+    pdf.set_text_color(50, 50, 50)
+    
+    try:
+        pdf.write_html(html_content)
+        pdf.output(os.path.join(out_dir, fname))
+        return True
+    except Exception as e:
+        print(f"  ! PDF generation failed for {title}: {e}", file=sys.stderr)
+        return False
+
+
+def generate_html(meta: Dict[str, Any], detail: Dict[str, Any], out_dir: str, fname: str) -> bool:
+    """Save the post as a beautifully styled offline HTML document."""
+    title = detail.get("title") or meta.get("title") or "untitled"
+    subtitle = detail.get("subtitle") or meta.get("subtitle") or ""
+    date = (detail.get("post_date") or meta.get("post_date") or "")[:10]
+    url = detail.get("canonical_url") or meta.get("canonical_url") or ""
+    audience = detail.get("audience") or meta.get("audience") or "everyone"
+    body_html = detail.get("body_html") or ""
+    
+    subtitle_html = f'<div class="subtitle">{subtitle}</div>' if subtitle else ""
+    
+    html_template = f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{title}</title>
+  <style>
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 700px;
+      margin: 40px auto;
+      padding: 0 20px;
+      color: #333;
+    }}
+    h1 {{
+      font-size: 2.2em;
+      margin-bottom: 5px;
+    }}
+    .subtitle {{
+      font-size: 1.2em;
+      color: #666;
+      font-style: italic;
+      margin-bottom: 20px;
+    }}
+    .meta {{
+      font-size: 0.9em;
+      color: #888;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 20px;
+      margin-bottom: 30px;
+    }}
+    img {{
+      max-width: 100%;
+      height: auto;
+      display: block;
+      margin: 20px auto;
+      border-radius: 4px;
+    }}
+    a {{
+      color: #ff6719;
+      text-decoration: none;
+    }}
+    a:hover {{
+      text-decoration: underline;
+    }}
+  </style>
+</head>
+<body>
+  <h1>{title}</h1>
+  {subtitle_html}
+  <div class="meta">
+    <span>Published: {date}</span> | <span>Audience: {audience}</span> | <a href="{url}" target="_blank">Original Link</a>
+  </div>
+  <div class="content">
+    {body_html}
+  </div>
+</body>
+</html>"""
+    try:
+        with open(os.path.join(out_dir, fname), "w", encoding="utf-8") as f:
+            f.write(html_template)
+        return True
+    except Exception as e:
+        print(f"  ! HTML generation failed: {e}", file=sys.stderr)
+        return False
+
+
+def generate_json(meta: Dict[str, Any], detail: Dict[str, Any], out_dir: str, fname: str) -> bool:
+    """Save raw post metadata and content details as a structured JSON file."""
+    import json
+    post_data = {
+        "title": detail.get("title") or meta.get("title") or "",
+        "subtitle": detail.get("subtitle") or meta.get("subtitle") or "",
+        "date": (detail.get("post_date") or meta.get("post_date") or "")[:10],
+        "slug": meta.get("slug") or "",
+        "audience": detail.get("audience") or meta.get("audience") or "everyone",
+        "url": detail.get("canonical_url") or meta.get("canonical_url") or "",
+        "likes": detail.get("reaction_count") or meta.get("reaction_count") or 0,
+        "reshares": detail.get("restacks") or meta.get("restacks") or 0,
+        "comments": detail.get("comment_count") or meta.get("comment_count") or 0,
+        "body_html": detail.get("body_html") or "",
+    }
+    try:
+        with open(os.path.join(out_dir, fname), "w", encoding="utf-8") as f:
+            json.dump(post_data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"  ! JSON generation failed: {e}", file=sys.stderr)
+        return False
+
+
+# --------------------------------------------------------------------------- #
 # Main
 # --------------------------------------------------------------------------- #
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Archive a Substack to Markdown files.")
-    ap.add_argument("--url", default="https://killercharts.blog",
-                    help="Publication base URL (default: https://killercharts.blog)")
+    ap = argparse.ArgumentParser(description="Archive a Substack to Markdown, PDF, HTML, or JSON.")
+    ap.add_argument("--url", default="https://plotset2.substack.com/",
+                    help="Publication base URL (default: https://plotset2.substack.com/)")
     ap.add_argument("--out", default=None, help="Output directory (default: based on URL)")
     ap.add_argument("--limit", type=int, default=50, help="Archive page size")
     ap.add_argument("--delay", type=float, default=1.0,
@@ -294,6 +493,8 @@ def main() -> None:
                     help="Download inline images locally and rewrite links")
     ap.add_argument("--max-posts", type=int, default=None,
                     help="Maximum number of posts to download (useful for testing)")
+    ap.add_argument("--formats", default="pdf",
+                    help="Comma-separated list of formats to save: pdf, md, html, json (default: pdf)")
     args = ap.parse_args()
 
     base = args.url.rstrip("/")
@@ -304,6 +505,7 @@ def main() -> None:
     session = make_session(args.cookie)
     img_cache: Dict[str, str] = {}
 
+    formats = [f.strip().lower() for f in args.formats.split(",")]
     print(f"Enumerating archive at {base} ...")
     posts = []
     for post in fetch_archive(session, base, args.limit, args.delay):
@@ -315,9 +517,9 @@ def main() -> None:
         sys.exit(
             "No posts returned. The API may be unreachable from your network, "
             "or try the *.substack.com domain instead, e.g. "
-            "--url https://killercharts.substack.com"
+            "--url https://plotset2.substack.com"
         )
-    print(f"Found {len(posts)} posts. Downloading...\n")
+    print(f"Found {len(posts)} posts. Downloading (formats: {', '.join(formats)})...\n")
 
     csv_path = os.path.join(args.out, "posts.csv")
     csv_file = open(csv_path, "w", newline="", encoding="utf-8")
@@ -340,12 +542,36 @@ def main() -> None:
                 session, detail.get("body_html", ""), img_dir, args.delay, img_cache
             )
 
-        md = post_to_markdown(meta, detail_copy)
-
         date = (detail.get("post_date") or meta.get("post_date") or "")[:10]
-        fname = f"{date}_{slugify(slug)}.md".lstrip("_")
-        with open(os.path.join(args.out, fname), "w", encoding="utf-8") as f:
-            f.write(md)
+        base_name = f"{date}_{slugify(slug)}".lstrip("_")
+        
+        # Select primary representative filename for posts.csv and index.md
+        primary_fname = ""
+        if "pdf" in formats:
+            primary_fname = f"{base_name}.pdf"
+        elif "md" in formats:
+            primary_fname = f"{base_name}.md"
+        elif "html" in formats:
+            primary_fname = f"{base_name}.html"
+        elif "json" in formats:
+            primary_fname = f"{base_name}.json"
+        else:
+            primary_fname = f"{base_name}.pdf"
+
+        # Generate files based on formats
+        if "pdf" in formats:
+            generate_pdf(meta, detail_copy, args.out, f"{base_name}.pdf")
+            
+        if "md" in formats:
+            md = post_to_markdown(meta, detail_copy)
+            with open(os.path.join(args.out, f"{base_name}.md"), "w", encoding="utf-8") as f:
+                f.write(md)
+                
+        if "html" in formats:
+            generate_html(meta, detail_copy, args.out, f"{base_name}.html")
+            
+        if "json" in formats:
+            generate_json(meta, detail_copy, args.out, f"{base_name}.json")
 
         title = detail.get("title") or meta.get("title") or slug
         likes = detail.get("reaction_count") or meta.get("reaction_count") or 0
@@ -361,10 +587,10 @@ def main() -> None:
             reshares,
             comments,
             detail.get("canonical_url") or meta.get("canonical_url") or "",
-            fname
+            primary_fname
         ])
 
-        index_rows.append((date, title, fname, likes, reshares, comments))
+        index_rows.append((date, title, primary_fname, likes, reshares, comments))
         print(f"[{i}/{len(posts)}] {date}  {title[:60]}")
         time.sleep(args.delay)
 

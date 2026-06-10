@@ -217,6 +217,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const delay = parseFloat(delaySlider.value);
     const cookie = cookieInput.value.trim();
     
+    // Collect active formats
+    const formatsList = [];
+    if (document.getElementById('format-pdf').checked) formatsList.push('pdf');
+    if (document.getElementById('format-md').checked) formatsList.push('md');
+    if (document.getElementById('format-html').checked) formatsList.push('html');
+    if (document.getElementById('format-json').checked) formatsList.push('json');
+    
+    if (formatsList.length === 0) {
+      alert("Please select at least one file format (PDF, MD, HTML, or JSON).");
+      return;
+    }
+    const formats = formatsList.join(',');
+    
     let maxPosts = null;
     const maxPostsVal = maxPostsInput.value.trim();
     if (maxPostsVal !== "") {
@@ -241,7 +254,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     try {
       if (window.pywebview && window.pywebview.api) {
-        await window.pywebview.api.start_scrape(activeUrl, images, delay, cookie, maxPosts);
+        await window.pywebview.api.start_scrape(activeUrl, images, delay, cookie, maxPosts, formats);
       } else {
         // Mock Progress for browser debugging
         console.log(`Starting mock scrape for: ${activeUrl}, images: ${images}, delay: ${delay}, maxPosts: ${maxPosts}`);
