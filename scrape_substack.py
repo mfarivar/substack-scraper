@@ -83,8 +83,14 @@ def make_session(cookie: str) -> requests.Session:
     return s
 
 
+LAST_API_ERROR: Optional[str] = None
+
+
 def get_json(session: requests.Session, url: str, delay: float, retries: int = 4) -> Optional[Any]:
     """GET a URL and return parsed JSON, with exponential backoff on errors."""
+    global LAST_API_ERROR
+    LAST_API_ERROR = None
+    
     for attempt in range(retries):
         try:
             r = session.get(url, timeout=30)
@@ -92,16 +98,21 @@ def get_json(session: requests.Session, url: str, delay: float, retries: int = 4
                 try:
                     return r.json()
                 except ValueError:
-                    print(f"  ! Non-JSON response from {url}", file=sys.stderr)
+                    LAST_API_ERROR = f"Non-JSON response from {url}"
+                    print(f"  ! {LAST_API_ERROR}", file=sys.stderr)
                     return None
             if r.status_code == 404:
+                LAST_API_ERROR = f"URL not found (HTTP 404): {url}"
                 return None
             if r.status_code in (401, 403):
-                print(f"  ! Auth / Permission error (HTTP {r.status_code}) on {url}", file=sys.stderr)
+                LAST_API_ERROR = f"Authentication / Permission error (HTTP {r.status_code}) on {url}"
+                print(f"  ! {LAST_API_ERROR}", file=sys.stderr)
                 return None
-            print(f"  ! HTTP {r.status_code} on {url}", file=sys.stderr)
+            LAST_API_ERROR = f"HTTP Error {r.status_code} on {url}"
+            print(f"  ! {LAST_API_ERROR}", file=sys.stderr)
         except requests.RequestException as e:
-            print(f"  ! Request error ({e}) on {url}", file=sys.stderr)
+            LAST_API_ERROR = f"Network request failed: {str(e)}"
+            print(f"  ! {LAST_API_ERROR}", file=sys.stderr)
         time.sleep(delay * (attempt + 2))  # Exponential backoff
     return None
 

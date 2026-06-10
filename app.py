@@ -273,7 +273,10 @@ class StackFlowAPI:
                     break
                     
             if not posts:
-                self.window.evaluate_js("window.scrapeFailed('No articles returned from Substack archive API.')")
+                import scrape_substack
+                api_err = scrape_substack.LAST_API_ERROR or "No articles returned from Substack archive API."
+                err_msg = f"Scraping failed: {api_err}"
+                self.window.evaluate_js(f"window.scrapeFailed({json.dumps(err_msg)})")
                 return
                 
             total_items = len(posts)
