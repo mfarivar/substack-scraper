@@ -1,0 +1,11 @@
+# Python virtual environment
+.venv/
+__pycache__/
+*.pyc
+
+# Local scraped output directories
+*_md/
+substack_md/
+
+# Log files
+*.log
