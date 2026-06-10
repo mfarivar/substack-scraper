@@ -93,17 +93,31 @@ document.addEventListener('DOMContentLoaded', () => {
     delayValue.innerText = `${delaySlider.value}s`;
   });
 
-  // Simple Substack domain detection regex (matches *.substack.com or standard HTTP/S domains)
-  const SUBSTACK_REGEX = /^(https?:\/\/)?([a-zA-Z0-9_-]+\.)+[a-zA-Z]{2,}(\/.*)?$/;
-
   function parseSubstackUrl(text) {
     if (!text) return null;
-    const trimmed = text.trim();
-    if (trimmed.match(SUBSTACK_REGEX)) {
-      // Basic check: starts with http/https or looks like a domain
-      return trimmed.startsWith('http') ? trimmed : `https://${trimmed}`;
+    let trimmed = text.trim();
+    if (!trimmed) return null;
+
+    // Check if it matches a basic URL or domain structure first
+    if (!/^(https?:\/\/)?([a-zA-Z0-9_-]+\.)+[a-zA-Z]{2,}/i.test(trimmed)) {
+      return null;
     }
-    return null;
+
+    let urlString = trimmed;
+    if (!/^https?:\/\//i.test(trimmed)) {
+      urlString = 'https://' + trimmed;
+    }
+
+    try {
+      const parsed = new URL(urlString);
+      const host = parsed.hostname;
+      if (!host || !host.includes('.')) {
+        return null;
+      }
+      return `${parsed.protocol}//${host}`;
+    } catch (e) {
+      return null;
+    }
   }
 
   // Clipboard Paste Handler
@@ -118,27 +132,60 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // URL Input listener
+  // URL Input listener: fetches metadata if a valid URL is typed, but does NOT show errors while typing
   urlInput.addEventListener('input', () => {
     const rawText = urlInput.value;
     const detectedUrl = parseSubstackUrl(rawText);
     
+    // Clear validation error when user actively types
+    urlError.classList.add('hidden');
+    
     if (!detectedUrl) {
-      if (rawText.trim() === "") {
-        urlError.classList.add('hidden');
-      } else {
-        urlError.innerText = "Please enter a valid Substack URL (e.g. publication.substack.com or custom domain).";
-        urlError.classList.remove('hidden');
-      }
-      resetMetadataState();
+      resetMetadataState(false);
       return;
     }
-    
-    urlError.classList.add('hidden');
     
     if (activeUrl !== detectedUrl) {
       activeUrl = detectedUrl;
       fetchMetadata(activeUrl);
+    }
+  });
+
+  // Validate on blur or Enter key
+  function validateInput(showErrorIfInvalid = true) {
+    const rawText = urlInput.value.trim();
+    if (rawText === "") {
+      urlError.classList.add('hidden');
+      resetMetadataState(false);
+      return false;
+    }
+
+    const detectedUrl = parseSubstackUrl(rawText);
+    if (!detectedUrl) {
+      if (showErrorIfInvalid) {
+        urlError.innerText = "Please enter a valid Substack URL (e.g. publication.substack.com or custom domain).";
+        urlError.classList.remove('hidden');
+      }
+      resetMetadataState(false);
+      return false;
+    }
+
+    urlError.classList.add('hidden');
+    if (activeUrl !== detectedUrl) {
+      activeUrl = detectedUrl;
+      fetchMetadata(activeUrl);
+    }
+    return true;
+  }
+
+  urlInput.addEventListener('blur', () => {
+    validateInput(true);
+  });
+
+  urlInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      validateInput(true);
+      urlInput.blur();
     }
   });
 
@@ -184,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function showError(msg) {
     urlError.innerText = msg;
     urlError.classList.remove('hidden');
-    resetMetadataState();
+    resetMetadataState(false);
   }
 
   function showLoading(show) {
@@ -199,9 +246,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function resetMetadataState(clearInput = true) {
     if (clearInput) {
       urlInput.value = "";
-      activeUrl = "";
       syncLastClipboardWithoutPaste();
     }
+    activeUrl = ""; // Always clear activeUrl when resetting metadata
     pubPreviewCard.classList.add('hidden');
     pubLogo.src = "";
     pubTitle.innerText = "";

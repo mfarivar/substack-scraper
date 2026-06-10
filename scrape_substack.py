@@ -55,9 +55,19 @@ EXT_BY_CT: Dict[str, str] = {
 }
 
 
-# --------------------------------------------------------------------------- #
-# Helpers
-# --------------------------------------------------------------------------- #
+def normalize_url(url: str) -> str:
+    """Normalize a Substack URL to its base publication URL (protocol + domain)."""
+    if not url:
+        return ""
+    url = url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    parsed = urlparse(url)
+    if parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return url
+
+
 def slugify(value: str, fallback: str = "post") -> str:
     """Convert a string into a clean URL slug."""
     value = re.sub(r"[^\w\s-]", "", (value or "")).strip().lower()
@@ -517,7 +527,7 @@ def main() -> None:
                     help="Comma-separated list of formats to save: pdf, md, html, json (default: pdf)")
     args = ap.parse_args()
 
-    base = args.url.rstrip("/")
+    base = normalize_url(args.url)
     if not args.out:
         args.out = get_default_out_dir(base)
     os.makedirs(args.out, exist_ok=True)

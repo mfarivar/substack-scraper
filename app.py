@@ -39,7 +39,8 @@ from scrape_substack import (
     slugify,
     generate_pdf,
     generate_html,
-    generate_json
+    generate_json,
+    normalize_url
 )
 
 class StackFlowAPI:
@@ -63,6 +64,7 @@ class StackFlowAPI:
 
     def get_substack_info(self, url):
         """Fetch Substack publication metadata (title, description, logo) from its homepage."""
+        url = normalize_url(url)
         try:
             headers = {
                 "User-Agent": (
@@ -248,7 +250,7 @@ class StackFlowAPI:
     def _scrape_worker(self, url, download_images, delay, cookie, max_posts, formats="pdf"):
         session = make_session(cookie)
         try:
-            base = url.rstrip("/")
+            base = normalize_url(url)
             downloads_dir = self.get_download_folder()
             
             # Substack default directory name (e.g. plotset2_md)
@@ -381,10 +383,10 @@ class StackFlowAPI:
                     f.write(f"| {date} | {safe} | {likes} | {reshares} | {comments} | [{fname}](./{fname}) |\n")
                     
             # Add to history
-            pub_info = self.get_substack_info(url)
+            pub_info = self.get_substack_info(base)
             pub_title = pub_info.get("title") if (pub_info and not pub_info.get("error")) else out_folder_name.replace("_md", "").replace("-", " ").title()
             
-            self._add_to_history(pub_title, out_folder_name, out_dir, url)
+            self._add_to_history(pub_title, out_folder_name, out_dir, base)
             
             success_msg = f"Archived {total_items} posts successfully!"
             self.window.evaluate_js(f"window.scrapeComplete({json.dumps(out_dir)}, {json.dumps(success_msg)})")
