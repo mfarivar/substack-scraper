@@ -19,7 +19,20 @@ If you want to try StackFlow immediately without installing Python, dependencies
 2. Drag the **StackFlow** icon into your **Applications** folder.
 3. Launch **StackFlow** from your Applications directory.
 
-*Note: Since the app is compiled locally and not signed with an Apple Developer ID, macOS Gatekeeper may block launching it the first time. To bypass this, **Right-click (or Control-click) StackFlow.app** in Finder, select **Open**, and click **Open** in the warning dialog. This registers a permanent security exception.*
+> [!IMPORTANT]
+> **Bypassing macOS Gatekeeper ("Apple could not verify...")**
+>
+> Since StackFlow is compiled locally and not signed with an Apple Developer Account, macOS Gatekeeper will block execution on the first launch with a warning saying it "could not verify the developer". You can easily bypass this using one of the following methods:
+> 
+> * **Standard GUI Method**:
+>   1. Open your **Applications** folder in Finder.
+>   2. **Right-click (or Control-click) StackFlow.app** and select **Open** from the context menu.
+>   3. In the dialog that appears, click the **Open** button to authorize and launch the application. This registers a permanent security exception.
+> * **Terminal Method**:
+>   If you prefer the command line or the GUI method is blocked on newer macOS versions, open your Terminal and run the following command to strip the quarantine attribute:
+>   ```bash
+>   xattr -cr /Applications/StackFlow.app
+>   ```
 
 ---
 

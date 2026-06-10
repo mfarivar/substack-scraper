@@ -93,6 +93,9 @@ class StackFlowAPI:
 
     def start_scrape(self, url, download_images, delay, cookie, max_posts):
         """Starts the scraping process in a background thread."""
+        if self._scrape_thread and self._scrape_thread.is_alive():
+            print("Warning: Scraping is already in progress.")
+            return False
         self._cancelled = False
         self._scrape_thread = threading.Thread(
             target=self._scrape_worker,
@@ -231,6 +234,7 @@ class StackFlowAPI:
         return False
 
     def _scrape_worker(self, url, download_images, delay, cookie, max_posts):
+        session = make_session(cookie)
         try:
             base = url.rstrip("/")
             downloads_dir = self.get_download_folder()
@@ -241,7 +245,6 @@ class StackFlowAPI:
             os.makedirs(out_dir, exist_ok=True)
             img_dir = os.path.join(out_dir, "images")
             
-            session = make_session(cookie)
             img_cache = {}
             
             self.window.evaluate_js("window.updateStatusText('Enumerating publication archive...')")
@@ -350,6 +353,8 @@ class StackFlowAPI:
             import traceback
             traceback.print_exc()
             self.window.scrapeFailed(f"Unexpected error: {str(e)}")
+        finally:
+            session.close()
 
 
 def main():
