@@ -340,13 +340,46 @@ def generate_pdf(meta: Dict[str, Any], detail: Dict[str, Any], out_dir: str, fna
     body_html = detail.get("body_html", "")
     pdf_soup = BeautifulSoup(body_html, "html.parser")
     
-    # Resolve images to absolute local paths
+    # Resolve images to absolute local paths and compute proper display dimensions
     for img in pdf_soup.find_all("img"):
         src = img.get("src")
         if src and src.startswith("images/"):
-            img["src"] = os.path.abspath(os.path.join(out_dir, src))
+            local_path = os.path.abspath(os.path.join(out_dir, src))
+            img["src"] = local_path
             if img.get("srcset"):
                 del img["srcset"]
+
+            # Compute proper display dimensions using PIL to prevent cropping
+            if os.path.exists(local_path):
+                try:
+                    from PIL import Image as PILImage
+                    with PILImage.open(local_path) as pil_img:
+                        w_px, h_px = pil_img.size
+
+                    # Convert pixels to mm at a target DPI (e.g. 120 DPI)
+                    # 1 inch = 25.4 mm
+                    target_w = w_px * 25.4 / 120.0
+                    target_h = h_px * 25.4 / 120.0
+
+                    # Page dimensions check: A4 width is 210mm, margins 10mm -> 190mm printable width
+                    max_w = 190.0
+                    max_h = 220.0  # Capped height to prevent page overflow
+
+                    if target_w > max_w:
+                        scale = max_w / target_w
+                        target_w = max_w
+                        target_h = target_h * scale
+
+                    if target_h > max_h:
+                        scale = max_h / target_h
+                        target_h = max_h
+                        target_w = target_w * scale
+
+                    # Set the calculated dimensions in mm
+                    img["width"] = f"{round(target_w, 1)}"
+                    img["height"] = f"{round(target_h, 1)}"
+                except Exception as img_err:
+                    print(f"  ! Failed to scale image {local_path}: {img_err}", file=sys.stderr)
                 
     # Clean unsupported tags for fpdf2
     for tag in pdf_soup.find_all(["script", "style", "button", "iframe", "video", "svg"]):
